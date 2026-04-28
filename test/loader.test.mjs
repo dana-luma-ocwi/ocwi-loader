@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const loaderSource = await readFile(path.join(root, 'dist', 'loader.js'), 'utf8')
+const fixedNow = Date.UTC(2026, 3, 28, 15, 0, 0)
+const cacheBucket = String(Math.floor(fixedNow / 3600000))
 
 function makeScript(attrs = {}) {
   return {
@@ -24,7 +26,13 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
   const appended = []
   const warnings = []
   const currentScript = makeScript(attrs)
+  class FixedDate extends Date {
+    constructor(...args) {
+      super(...(args.length ? args : [fixedNow]))
+    }
+  }
   const context = {
+    Date: FixedDate,
     window: {
       console: {
         warn(message) {
@@ -94,9 +102,13 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
   assert.equal(writes.length, 1)
   assert.match(
     writes[0],
-    /src="https:\/\/cdn\.jsdelivr\.net\/npm\/ocwi-core@1\.1\.1\/dist\/ocwi\.min\.js"/,
+    /src="https:\/\/cdn\.jsdelivr\.net\/npm\/ocwi-core@latest\/dist\/ocwi\.min\.js\?ocwi-loader-cache=\d+"/,
   )
-  assert.equal(context.window.OCWI_LOADER.coreVersion, '1.1.1')
+  assert.equal(context.window.OCWI_LOADER.coreVersion, 'latest')
+  assert.equal(
+    context.window.OCWI_LOADER.coreUrl,
+    `https://cdn.jsdelivr.net/npm/ocwi-core@latest/dist/ocwi.min.js?ocwi-loader-cache=${cacheBucket}`,
+  )
   assert.equal(context.window.OCWI_LOADER.mode, 'document.write')
 }
 
@@ -107,6 +119,7 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
     },
   })
   assert.match(writes[0], /ocwi-core@2\.0\.0-beta\.1\/dist\/ocwi\.min\.js/)
+  assert.doesNotMatch(writes[0], /ocwi-loader-cache=/)
 }
 
 {
@@ -115,7 +128,10 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
       'data-ocwi-version': 'latest',
     },
   })
-  assert.match(writes[0], /ocwi-core@latest\/dist\/ocwi\.min\.js/)
+  assert.match(
+    writes[0],
+    new RegExp(`ocwi-core@latest\\/dist\\/ocwi\\.min\\.js\\?ocwi-loader-cache=${cacheBucket}`),
+  )
   assert.equal(context.window.OCWI_LOADER.coreVersion, 'latest')
 }
 
@@ -125,8 +141,11 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
       'data-ocwi-version': 'bad/version',
     },
   })
-  assert.match(writes[0], /ocwi-core@1\.1\.1\/dist\/ocwi\.min\.js/)
-  assert.equal(context.window.OCWI_LOADER.coreVersion, '1.1.1')
+  assert.match(
+    writes[0],
+    new RegExp(`ocwi-core@latest\\/dist\\/ocwi\\.min\\.js\\?ocwi-loader-cache=${cacheBucket}`),
+  )
+  assert.equal(context.window.OCWI_LOADER.coreVersion, 'latest')
   assert.ok(warnings.some((message) => message.includes('Ignoring invalid OCWI core version')))
 }
 
@@ -138,6 +157,7 @@ function runLoader({ attrs = {}, readyState = 'loading', appendLoads = false } =
   })
   assert.match(writes[0], /src="https:\/\/static\.example\.com\/ocwi\/custom\.js"/)
   assert.equal(context.window.OCWI_LOADER.coreUrl, 'https://static.example.com/ocwi/custom.js')
+  assert.doesNotMatch(writes[0], /ocwi-loader-cache=/)
 }
 
 {

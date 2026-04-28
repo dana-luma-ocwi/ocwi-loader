@@ -14,7 +14,7 @@
   },
   "ocwiLoader": {
     "corePackage": "ocwi-core",
-    "coreVersion": "1.1.1",
+    "coreVersion": "latest",
     "coreFile": "dist/ocwi.min.js",
     "cdnBase": "https://cdn.jsdelivr.net/npm"
   }

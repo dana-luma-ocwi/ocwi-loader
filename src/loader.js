@@ -66,8 +66,9 @@
 
     var coreFile = stripSlashes(readAttr(script, 'data-ocwi-file') || DEFAULT_CORE_FILE);
     var cdnBase = stripTrailingSlash(readAttr(script, 'data-ocwi-cdn-base') || DEFAULT_CDN_BASE);
+    var coreUrl = cdnBase + '/' + packageName + '@' + version + '/' + coreFile;
 
-    return cdnBase + '/' + packageName + '@' + version + '/' + coreFile;
+    return isLatestVersion(version) ? appendCacheBuster(coreUrl) : coreUrl;
   }
 
   function getCurrentScript() {
@@ -306,6 +307,27 @@
 
     warn('Ignoring invalid OCWI core version override: ' + version);
     return '';
+  }
+
+  function isLatestVersion(version) {
+    return String(version || '').toLowerCase() === 'latest';
+  }
+
+  function appendCacheBuster(url) {
+    return appendQueryParam(url, 'ocwi-loader-cache', getHourlyCacheBucket());
+  }
+
+  function getHourlyCacheBucket() {
+    return String(Math.floor(new Date().getTime() / 3600000));
+  }
+
+  function appendQueryParam(url, name, value) {
+    var hashIndex = url.indexOf('#');
+    var hash = hashIndex === -1 ? '' : url.slice(hashIndex);
+    var base = hashIndex === -1 ? url : url.slice(0, hashIndex);
+    var separator = base.indexOf('?') === -1 ? '?' : '&';
+
+    return base + separator + encodeURIComponent(name) + '=' + encodeURIComponent(value) + hash;
   }
 
   function stripTrailingSlash(value) {
