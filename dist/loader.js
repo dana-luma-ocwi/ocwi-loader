@@ -1,11 +1,11 @@
-/*! ocwi-loader v1.0.0
+/*! ocwi-loader v1.0.1
  * core: ocwi-core@latest
  * This file is generated from src/loader.js.
  */
 (function () {
   'use strict';
 
-  var LOADER_VERSION = "1.0.0";
+  var LOADER_VERSION = "1.0.1";
   var DEFAULT_CORE_PACKAGE = "ocwi-core";
   var DEFAULT_CORE_VERSION = "latest";
   var DEFAULT_CORE_FILE = "dist/ocwi.min.js";

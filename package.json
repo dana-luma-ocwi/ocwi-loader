@@ -1,6 +1,6 @@
 {
   "name": "ocwi-loader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Stable loader for the OCWI embeddable widget runtime.",
   "type": "module",
   "engines": {
