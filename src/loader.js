@@ -155,15 +155,17 @@
   }
 
   // A stalled request (connection hangs, no response, no error) fires neither
-  // onload nor onerror, so without a bound the deferred proxy queues forever. The
-  // watchdog surfaces the stall after a bounded wait; the guard makes it a no-op
-  // once onload/onerror has already settled the load, so a normal load never trips it.
+  // onload nor onerror, so without a bound the deferred proxy queues forever.
   function armLoadWatchdog(src) {
     if (!root.setTimeout) return;
     root.setTimeout(function () {
       if (!root.__OCWI_LOADER_LOADING__) return;
-      markCoreError(new Error('Timed out waiting for OCWI core bundle to load: ' + src));
+      markCoreError(coreTimeoutError(src));
     }, DYNAMIC_LOAD_TIMEOUT_MS);
+  }
+
+  function coreTimeoutError(url) {
+    return new Error('Timed out waiting for OCWI core bundle to load: ' + url);
   }
 
   function installDeferredProxy() {
@@ -345,7 +347,7 @@
           tick(false);
           return;
         }
-        markCoreError(new Error('Timed out waiting for OCWI core bundle to load: ' + coreUrl));
+        markCoreError(coreTimeoutError(coreUrl));
       }, first ? 0 : CORE_POLL_INTERVAL_MS);
     })(true);
   }
