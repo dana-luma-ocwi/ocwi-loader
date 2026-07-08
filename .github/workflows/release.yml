@@ -6,8 +6,11 @@ name: Release
 #
 # Release flow:
 #   1. bump package.json `version`
-#   2. set `ocwiLoader.coreVersion` to the published ocwi-core to pin (or leave
-#      "latest"); commit
+#   2. pin the core: set `ocwiLoader.coreVersion` to the published ocwi-core and
+#      `ocwiLoader.coreSri` to its sha384 Subresource Integrity hash (derive it
+#      with: curl -fsSL <coreUrl> | openssl dgst -sha384 -binary | openssl base64
+#      -A, then prefix "sha384-"). Leaving "latest" ships the mutable opt-in with
+#      no SRI. The build FAILS if an exact version is set without a matching SRI.
 #   3. push tag v<version>
 #
 # Prerequisites (set by a repo admin, not by CI):
@@ -55,26 +58,37 @@ jobs:
       - name: Test (default 'latest' build + loader behaviour)
         run: npm test
 
-      - name: Resolve ocwi-core version to bake in
+      - name: Resolve ocwi-core version + SRI to bake in
         id: core
         run: |
           CV="$(node -p "require('./package.json').ocwiLoader.coreVersion")"
+          SRI="$(node -p "require('./package.json').ocwiLoader.coreSri || ''")"
           echo "version=$CV" >> "$GITHUB_OUTPUT"
-          echo "Baking ocwi-core@$CV into the loader"
+          echo "sri=$SRI" >> "$GITHUB_OUTPUT"
+          echo "Baking ocwi-core@$CV${SRI:+ with SRI $SRI} into the loader"
 
       - name: Build loader with the resolved core version
         run: npm run build
         env:
           OCWI_CORE_VERSION: ${{ steps.core.outputs.version }}
+          OCWI_CORE_SRI: ${{ steps.core.outputs.sri }}
 
-      - name: Assert built loader references the intended core version
+      - name: Assert built loader references the intended core version and SRI
         run: |
           CV="${{ steps.core.outputs.version }}"
+          SRI="${{ steps.core.outputs.sri }}"
           if ! grep -q "ocwi-core@${CV}" dist/loader.js; then
             echo "::error::dist/loader.js does not reference ocwi-core@${CV}"
             exit 1
           fi
           echo "dist/loader.js references ocwi-core@${CV}"
+          if [ -n "$SRI" ]; then
+            if ! grep -qF "$SRI" dist/loader.js; then
+              echo "::error::dist/loader.js does not embed the pinned SRI $SRI"
+              exit 1
+            fi
+            echo "dist/loader.js embeds the pinned SRI"
+          fi
 
       - name: Publish to npm
         run: npm publish --access public

@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
+import { buildLoaderSource } from '../scripts/build.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const loaderSource = await readFile(path.join(root, 'dist', 'loader.js'), 'utf8')
+const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const fixedNow = Date.UTC(2026, 3, 28, 15, 0, 0)
 const cacheBucket = String(Math.floor(fixedNow / 3600000))
 
@@ -29,6 +31,7 @@ function createHarness({
   appendLoads = false,
   seedWindow = {},
   noCreateElement = false,
+  source = loaderSource,
 } = {}) {
   const writes = []
   const appended = []
@@ -112,7 +115,7 @@ function createHarness({
 
   function run({ attrs = {} } = {}) {
     document.currentScript = makeScript(attrs)
-    vm.runInContext(loaderSource, context)
+    vm.runInContext(source, context)
   }
 
   return { context, writes, appended, warnings, timers, flushTimers, run }
@@ -427,5 +430,92 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
   assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
 }
+
+// --- Issue #5: exact-version pin + Subresource Integrity + immutable caching ---
+
+// sha384 of the ASCII string "ocwi-loader-sri-fixture": a real, reproducible hash
+// used only as a format-valid FIXTURE. No real ocwi-core bundle hash is committed
+// into the loader - that is a per-release value the build/CD supplies.
+const PINNED_VERSION = '1.2.3'
+const FIXTURE_SRI = 'sha384-s06eU2HcZfVJPzEgrE15N3hwPYkyZTM8KQUHrz4O1YAsF4WcLltOEVgVnT0hyM5b'
+const pinnedSource = await buildLoaderSource(pkg, {
+  OCWI_CORE_VERSION: PINNED_VERSION,
+  OCWI_CORE_SRI: FIXTURE_SRI,
+})
+const pinnedVersionPattern = new RegExp('ocwi-core@' + PINNED_VERSION.replace(/\./g, '\\.') + '/')
+
+// P1: document.write path on a pinned build - exact version, integrity + crossorigin,
+// and no cache-buster (the exact URL is immutable).
+{
+  const { writes } = runLoader({ readyState: 'loading', source: pinnedSource })
+  assert.match(writes[0], pinnedVersionPattern)
+  assert.doesNotMatch(writes[0], /@latest/)
+  assert.doesNotMatch(writes[0], /ocwi-loader-cache=/)
+  assert.ok(writes[0].includes('integrity="' + FIXTURE_SRI + '"'))
+  assert.match(writes[0], /crossorigin="anonymous"/)
+}
+
+// P2: dynamic path on a pinned build carries the same integrity + crossorigin.
+{
+  const { appended } = runLoader({ readyState: 'complete', source: pinnedSource })
+  assert.equal(appended.length, 1)
+  assert.match(appended[0].src, pinnedVersionPattern)
+  assert.doesNotMatch(appended[0].src, /ocwi-loader-cache=/)
+  assert.equal(appended[0].attrs.integrity, FIXTURE_SRI)
+  assert.equal(appended[0].attrs.crossorigin, 'anonymous')
+}
+
+// P3: latest stays an explicit opt-in even on a pinned build - the cache-buster
+// returns and no integrity is emitted (a mutable tag has no stable hash).
+{
+  const { writes } = runLoader({
+    readyState: 'loading',
+    attrs: { 'data-ocwi-version': 'latest' },
+    source: pinnedSource,
+  })
+  assert.match(writes[0], /ocwi-core@latest\//)
+  assert.match(writes[0], /ocwi-loader-cache=/)
+  assert.doesNotMatch(writes[0], /integrity=/)
+  assert.doesNotMatch(writes[0], /crossorigin=/)
+}
+
+// P4: a data-ocwi-* override changes the artifact, so the pinned hash no longer
+// matches. The loader drops it and warns rather than attaching a wrong hash.
+{
+  const { appended, warnings } = runLoader({
+    readyState: 'complete',
+    attrs: { 'data-ocwi-version': '9.9.9' },
+    source: pinnedSource,
+  })
+  assert.equal(appended[0].attrs.integrity, undefined)
+  assert.equal(appended[0].attrs.crossorigin, undefined)
+  assert.ok(warnings.some((message) => message.includes('Subresource Integrity')))
+}
+
+// P5: overriding to the SAME pinned version keeps the SRI (the artifact is identical).
+{
+  const { appended } = runLoader({
+    readyState: 'complete',
+    attrs: { 'data-ocwi-version': PINNED_VERSION },
+    source: pinnedSource,
+  })
+  assert.equal(appended[0].attrs.integrity, FIXTURE_SRI)
+  assert.equal(appended[0].attrs.crossorigin, 'anonymous')
+}
+
+// P6: the build fails loudly rather than shipping an unverifiable or contradictory
+// pin (no silent fallback to an unpinned / unhashed core).
+await assert.rejects(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION }),
+  /requires OCWI_CORE_SRI/,
+)
+await assert.rejects(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'latest', OCWI_CORE_SRI: FIXTURE_SRI }),
+  /cannot be combined with coreVersion 'latest'/,
+)
+await assert.rejects(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION, OCWI_CORE_SRI: 'not-a-real-sri' }),
+  /not a valid Subresource Integrity/,
+)
 
 console.log('loader tests passed')

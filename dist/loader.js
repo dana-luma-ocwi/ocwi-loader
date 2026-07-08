@@ -10,6 +10,7 @@
   var DEFAULT_CORE_VERSION = "latest";
   var DEFAULT_CORE_FILE = "dist/ocwi.min.js";
   var DEFAULT_CDN_BASE = "https://cdn.jsdelivr.net/npm";
+  var DEFAULT_CORE_SRI = "";
   var GLOBAL_NAME = 'OCWI';
   var META_NAME = 'OCWI_LOADER';
 
@@ -17,8 +18,10 @@
   var doc = root.document;
   var currentScript = getCurrentScript();
   var corePackage = readAttr(currentScript, 'data-ocwi-package') || DEFAULT_CORE_PACKAGE;
-  var coreVersion = normalizeVersion(readAttr(currentScript, 'data-ocwi-version')) || DEFAULT_CORE_VERSION;
+  var versionAttr = normalizeVersion(readAttr(currentScript, 'data-ocwi-version'));
+  var coreVersion = versionAttr || DEFAULT_CORE_VERSION;
   var coreUrl = resolveCoreUrl(currentScript, corePackage, coreVersion);
+  var coreSri = resolveCoreSri(currentScript, coreVersion, versionAttr);
   var scriptNonce = readNonce(currentScript);
   var meta = (root[META_NAME] = root[META_NAME] || {});
 
@@ -26,6 +29,7 @@
   meta.corePackage = corePackage;
   meta.coreVersion = coreVersion;
   meta.coreUrl = coreUrl;
+  if (coreSri) meta.coreSri = coreSri;
   meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
   meta.mode = meta.loaded ? 'already-loaded' : 'pending';
   meta.startedAt = new Date().toISOString();
@@ -48,8 +52,9 @@
         '" data-ocwi-core="true" data-ocwi-core-version="' +
         escapeHtmlAttr(meta.coreVersion) +
         '"' +
+        (coreSri ? ' integrity="' + escapeHtmlAttr(coreSri) + '" crossorigin="anonymous"' : '') +
         (scriptNonce ? ' nonce="' + escapeHtmlAttr(scriptNonce) + '"' : '') +
-        '"><\/script>'
+        '><\/script>'
     );
     pollForLoaded();
     return;
@@ -73,6 +78,33 @@
     var coreUrl = cdnBase + '/' + packageName + '@' + version + '/' + coreFile;
 
     return isLatestVersion(version) ? appendCacheBuster(coreUrl) : coreUrl;
+  }
+
+  // The baked SRI hashes the exact pinned bundle only. A mutable 'latest' tag has
+  // no stable hash, and any data-ocwi-* override changes the artifact, so attaching
+  // the pinned hash there would either be wrong (browser blocks the load) or a
+  // false sense of integrity. In those cases we skip it and warn rather than
+  // silently swap in an unverified script.
+  function resolveCoreSri(script, version, versionAttr) {
+    if (!DEFAULT_CORE_SRI) return '';
+    if (isLatestVersion(version)) return '';
+
+    var overridden =
+      !!readAttr(script, 'data-ocwi-src') ||
+      !!readAttr(script, 'data-ocwi-package') ||
+      !!readAttr(script, 'data-ocwi-cdn-base') ||
+      !!readAttr(script, 'data-ocwi-file') ||
+      (!!versionAttr && versionAttr !== DEFAULT_CORE_VERSION);
+
+    if (overridden) {
+      warn(
+        'A data-ocwi-* override changed the core URL, so the pinned Subresource ' +
+          'Integrity hash was not applied to the injected script.'
+      );
+      return '';
+    }
+
+    return DEFAULT_CORE_SRI;
   }
 
   function getCurrentScript() {
@@ -104,6 +136,10 @@
     script.async = false;
     script.setAttribute('data-ocwi-core', 'true');
     script.setAttribute('data-ocwi-core-version', meta.coreVersion);
+    if (coreSri) {
+      script.setAttribute('integrity', coreSri);
+      script.setAttribute('crossorigin', 'anonymous');
+    }
     if (scriptNonce) {
       script.setAttribute('nonce', scriptNonce);
       try {

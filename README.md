@@ -44,6 +44,7 @@ The snippet shape is intentionally the same as the previous `ocwi-core` CDN snip
   `?ocwi-loader-cache=<hour-bucket>`
 - Because that inserted script is parser-blocking, the following inline `window.OCWI(...)` still sees the real synchronous OCWI API.
 - Exact core versions remain immutable and cacheable. The `latest` URL changes hourly so browsers do not keep an old core bundle for days.
+- When the loader is built with an exact `ocwi-core` version and its Subresource Integrity hash, the inserted core script carries `integrity="sha384-..."` and `crossorigin="anonymous"`, so the browser refuses a tampered bundle. `latest` is the explicit mutable opt-in and carries no integrity, because a moving tag has no stable hash.
 - If the loader script has a CSP `nonce`, the loader copies it to the inserted core script.
 
 Do not fetch the npm registry from browsers at runtime. That would make the startup path asynchronous and would break the synchronous snippet contract.
@@ -69,11 +70,15 @@ That means a user who reloads the page after the next hourly bucket receives a f
 npm run build
 ```
 
-By default, build values come from `package.json` under `ocwiLoader`. Release automation can override them, for example to pin a specific core version:
+By default, build values come from `package.json` under `ocwiLoader`. Release automation can override them, for example to pin a specific core version with its integrity hash:
 
 ```bash
-OCWI_CORE_VERSION=1.1.2 npm run build
+OCWI_CORE_VERSION=1.1.2 \
+OCWI_CORE_SRI="sha384-$(curl -fsSL https://cdn.jsdelivr.net/npm/ocwi-core@1.1.2/dist/ocwi.min.js | openssl dgst -sha384 -binary | openssl base64 -A)" \
+npm run build
 ```
+
+Pinning an exact version without an `OCWI_CORE_SRI` fails the build (an unverified pin is never shipped). Building `latest` is the explicit mutable opt-in and takes no SRI. `OCWI_CORE_SRI` can also be set as `ocwiLoader.coreSri` in `package.json`.
 
 The generated artifact is:
 
@@ -102,6 +107,8 @@ For debugging or staged rollout, the loader script supports these attributes:
 `data-ocwi-src` wins over `data-ocwi-version`.
 
 When `data-ocwi-version` is an exact version, the loader does not append the hourly cache-buster. When the effective version is `latest`, including the default, the cache-buster is appended automatically. `data-ocwi-src` is used exactly as provided.
+
+A `data-ocwi-*` override that changes the core URL away from the pinned build (a different version, or `data-ocwi-src`/`-package`/`-cdn-base`/`-file`) drops the built-in integrity hash and warns, because that hash no longer matches the requested bundle. Overriding to the same pinned version keeps the integrity attribute.
 
 ## Demo
 
