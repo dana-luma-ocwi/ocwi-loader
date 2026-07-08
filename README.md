@@ -35,6 +35,12 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 
 The snippet shape is intentionally close to the previous `ocwi-core` CDN snippet: the first script URL points at the loader and carries `async` so neither the loader nor the core blocks the page parser.
 
+On the async path the core loads from `cdn.jsdelivr.net`, a different origin from the loader (`cdn.amca.cz`), so its connection is opened only after `loader.js` runs. Adding a preconnect hint to the page `<head>` lets the browser start that DNS/TCP/TLS setup earlier, saving roughly 100-300ms on a first visit:
+
+```html
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+```
+
 ## How It Works
 
 - `loader.js` contains a build-time `ocwi-core` version. The default is `latest`.

@@ -58,10 +58,7 @@
     return;
   }
 
-  // Async dynamic injection is the recommended default. The document.write branch
-  // above is the legacy parser-blocking path, kept only for the old non-async
-  // snippet; there is no warning here because the deferred proxy makes inline
-  // window.OCWI(...) calls work regardless of load order.
+  // Async injection is the recommended path; the document.write branch above is the legacy fallback.
   meta.mode = 'dynamic';
   installDeferredProxy();
   injectDynamicScript(coreUrl);

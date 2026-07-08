@@ -208,10 +208,7 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(dynamic.appended[0].attrs.nonce, 'nonce-456')
 }
 
-// Issue #10: async is the first-class mode. The injected core script is async (a
-// single script has nothing to order against, so parser-blocking buys nothing), and
-// the loader no longer warns customers away from async - the deferred proxy already
-// makes inline window.OCWI(...) calls work.
+// Async is the first-class mode: the injected core script is async and the loader no longer warns against async.
 {
   const { context, writes, appended, warnings } = runLoader({
     attrs: { async: true },
