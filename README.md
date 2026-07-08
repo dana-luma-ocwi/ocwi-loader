@@ -11,7 +11,7 @@ OCWI is embedded on many customer websites. Those websites should not need a web
 The customer keeps one permanent script URL:
 
 ```html
-<script src="https://cdn.amca.cz/ocwi/loader.js"></script>
+<script src="https://cdn.amca.cz/ocwi/loader.js" async></script>
 ```
 
 The loader then resolves the current `ocwi-core@latest` bundle at runtime. For `latest`, it adds an hourly cache-busting query parameter so browsers do not keep an old already-downloaded core URL for days or weeks.
@@ -23,7 +23,7 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 ```html
 <div id="ocwi-19" class="mount"></div>
 
-<script src="https://cdn.amca.cz/ocwi/loader.js"></script>
+<script src="https://cdn.amca.cz/ocwi/loader.js" async></script>
 <script>
   window.OCWI('#ocwi-19', {
     api: {
@@ -33,21 +33,22 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 </script>
 ```
 
-The snippet shape is intentionally the same as the previous `ocwi-core` CDN snippet. Only the first script URL changes.
+The snippet shape is intentionally close to the previous `ocwi-core` CDN snippet: the first script URL points at the loader and carries `async` so neither the loader nor the core blocks the page parser.
 
 ## How It Works
 
 - `loader.js` contains a build-time `ocwi-core` version. The default is `latest`.
-- In normal classic script usage, it uses `document.write` to load:
+- With the recommended `async` snippet, the loader injects the core bundle as a single `async` script, so it does not block the page parser:
   `https://cdn.jsdelivr.net/npm/ocwi-core@<version>/dist/ocwi.min.js`
 - When the version is `latest`, the loader appends an hourly cache-busting query parameter:
   `?ocwi-loader-cache=<hour-bucket>`
-- Because that inserted script is parser-blocking, the following inline `window.OCWI(...)` still sees the real synchronous OCWI API.
+- Inline `window.OCWI(...)` calls that run before the core has loaded are captured by a deferred proxy that queues them and replays them (resolving each returned `.ready` promise) once the core registers, so the snippet's call shape is unchanged.
+- A plain non-async `<script src=".../loader.js"></script>` (the older snippet) instead uses `document.write` to inject a parser-blocking core. That path is kept only for backward compatibility; prefer the `async` snippet.
 - Exact core versions remain immutable and cacheable. The `latest` URL changes hourly so browsers do not keep an old core bundle for days.
 - When the loader is built with an exact `ocwi-core` version and its Subresource Integrity hash, the inserted core script carries `integrity="sha384-..."` and `crossorigin="anonymous"`, so the browser refuses a tampered bundle. `latest` is the explicit mutable opt-in and carries no integrity, because a moving tag has no stable hash.
 - If the loader script has a CSP `nonce`, the loader copies it to the inserted core script.
 
-Do not fetch the npm registry from browsers at runtime. That would make the startup path asynchronous and would break the synchronous snippet contract.
+Do not fetch the npm registry from browsers at runtime. That would add a registry round-trip to every startup; the loader resolves the core URL from its build-time version instead.
 
 ## Cache Behavior
 
@@ -155,7 +156,7 @@ Example fields:
   corePackage: 'ocwi-core',
   coreVersion: 'latest',
   coreUrl: 'https://cdn.jsdelivr.net/npm/ocwi-core@latest/dist/ocwi.min.js?ocwi-loader-cache=493887',
-  mode: 'document.write',
+  mode: 'dynamic',
   loaded: true
 }
 ```
@@ -199,7 +200,7 @@ Expected production shape:
   corePackage: 'ocwi-core',
   coreVersion: 'latest',
   coreUrl: 'https://cdn.jsdelivr.net/npm/ocwi-core@latest/dist/ocwi.min.js?ocwi-loader-cache=<hour-bucket>',
-  mode: 'document.write',
+  mode: 'dynamic',
   loaded: true
 }
 ```

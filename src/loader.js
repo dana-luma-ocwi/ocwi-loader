@@ -58,12 +58,11 @@
     return;
   }
 
+  // Async dynamic injection is the recommended default. The document.write branch
+  // above is the legacy parser-blocking path, kept only for the old non-async
+  // snippet; there is no warning here because the deferred proxy makes inline
+  // window.OCWI(...) calls work regardless of load order.
   meta.mode = 'dynamic';
-  warn(
-    'OCWI loader was not executed as a parser-blocking classic script. ' +
-      'The core bundle will load asynchronously; synchronous inline calls should use ' +
-      '<script src=".../loader.js"></script> without async, defer, or type="module".'
-  );
   installDeferredProxy();
   injectDynamicScript(coreUrl);
 
@@ -120,7 +119,10 @@
 
     var script = doc.createElement('script');
     script.src = src;
-    script.async = false;
+    // Async: a single injected core script has nothing to order against, so blocking
+    // the parser buys nothing. Inline window.OCWI(...) calls still work because the
+    // deferred proxy queues and replays them once the core registers.
+    script.async = true;
     script.setAttribute('data-ocwi-core', 'true');
     script.setAttribute('data-ocwi-core-version', meta.coreVersion);
     if (coreSri) {

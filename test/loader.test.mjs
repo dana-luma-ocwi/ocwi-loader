@@ -208,6 +208,10 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(dynamic.appended[0].attrs.nonce, 'nonce-456')
 }
 
+// Issue #10: async is the first-class mode. The injected core script is async (a
+// single script has nothing to order against, so parser-blocking buys nothing), and
+// the loader no longer warns customers away from async - the deferred proxy already
+// makes inline window.OCWI(...) calls work.
 {
   const { context, writes, appended, warnings } = runLoader({
     attrs: { async: true },
@@ -215,9 +219,10 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   })
   assert.equal(writes.length, 0)
   assert.equal(appended.length, 1)
+  assert.equal(appended[0].async, true)
   assert.equal(context.window.OCWI_LOADER.mode, 'dynamic')
   assert.equal(context.window.OCWI_LOADER.loaded, true)
-  assert.ok(warnings.some((message) => message.includes('not executed as a parser-blocking')))
+  assert.ok(!warnings.some((message) => message.includes('not executed as a parser-blocking')))
 }
 
 {
