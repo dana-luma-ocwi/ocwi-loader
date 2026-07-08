@@ -17,7 +17,7 @@
   var versionAttr = normalizeVersion(readAttr(currentScript, 'data-ocwi-version'));
   var coreVersion = versionAttr || DEFAULT_CORE_VERSION;
   var coreUrl = resolveCoreUrl(currentScript, corePackage, coreVersion);
-  var coreSri = resolveCoreSri(currentScript, coreVersion, versionAttr);
+  var coreSri = resolveCoreSri(coreUrl, coreVersion);
   var scriptNonce = readNonce(currentScript);
   var meta = (root[META_NAME] = root[META_NAME] || {});
 
@@ -76,31 +76,20 @@
     return isLatestVersion(version) ? appendCacheBuster(coreUrl) : coreUrl;
   }
 
-  // The baked SRI hashes the exact pinned bundle only. A mutable 'latest' tag has
-  // no stable hash, and any data-ocwi-* override changes the artifact, so attaching
-  // the pinned hash there would either be wrong (browser blocks the load) or a
-  // false sense of integrity. In those cases we skip it and warn rather than
-  // silently swap in an unverified script.
-  function resolveCoreSri(script, version, versionAttr) {
+  // The baked hash matches only the exact pinned bundle, so any override that
+  // changes the effective core URL invalidates it: attach it to the canonical URL only.
+  function resolveCoreSri(coreUrl, version) {
     if (!DEFAULT_CORE_SRI) return '';
     if (isLatestVersion(version)) return '';
 
-    var overridden =
-      !!readAttr(script, 'data-ocwi-src') ||
-      !!readAttr(script, 'data-ocwi-package') ||
-      !!readAttr(script, 'data-ocwi-cdn-base') ||
-      !!readAttr(script, 'data-ocwi-file') ||
-      (!!versionAttr && versionAttr !== DEFAULT_CORE_VERSION);
+    var canonical = resolveCoreUrl(null, DEFAULT_CORE_PACKAGE, DEFAULT_CORE_VERSION);
+    if (coreUrl === canonical) return DEFAULT_CORE_SRI;
 
-    if (overridden) {
-      warn(
-        'A data-ocwi-* override changed the core URL, so the pinned Subresource ' +
-          'Integrity hash was not applied to the injected script.'
-      );
-      return '';
-    }
-
-    return DEFAULT_CORE_SRI;
+    warn(
+      'A data-ocwi-* override changed the core URL, so the pinned Subresource ' +
+        'Integrity hash was not applied to the injected script.'
+    );
+    return '';
   }
 
   function getCurrentScript() {
@@ -349,6 +338,7 @@
     return '';
   }
 
+  // Mirror of isLatest() in scripts/build.mjs; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
   function isLatestVersion(version) {
     return String(version || '').toLowerCase() === 'latest';
   }

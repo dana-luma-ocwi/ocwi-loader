@@ -10,6 +10,7 @@ const distPath = path.join(distDir, 'loader.js')
 
 const SRI_PATTERN = /^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$/
 
+// Mirror of isLatestVersion() in src/loader.js; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
 function isLatest(version) {
   return String(version || '').toLowerCase() === 'latest'
 }
