@@ -483,6 +483,55 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.deepEqual(real.getState(), { ok: true })
 }
 
+// D1 (issue #7): dynamic path, the injected core script fires NEITHER onload nor
+// onerror - a stalled request (connection hangs, no response, no error). Without a
+// watchdog the queued handles and .ready wait forever. The bounded watchdog must
+// surface the stall - set meta.error, clear the loading lock, reject queued handles,
+// and warn - but only AFTER the watchdog interval, never synchronously.
+{
+  const harness = runLoader({ readyState: 'complete' })
+  assert.equal(harness.appended.length, 1)
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+
+  const handle = harness.context.window.OCWI('#chat')
+  let rejection = null
+  handle.ready.catch((error) => {
+    rejection = error
+  })
+
+  // Neither onload nor onerror fires: the stall must NOT settle before the watchdog.
+  await Promise.resolve()
+  assert.equal(rejection, null, 'a stalled load must not settle before the watchdog fires')
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, true)
+  assert.equal(harness.context.window.OCWI_LOADER.error, undefined)
+  assert.equal(harness.timers.length, 1, 'the dynamic path must arm a bounded watchdog timer')
+
+  harness.flushTimers()
+  await Promise.resolve()
+
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, false)
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
+  assert.match(harness.context.window.OCWI_LOADER.error, /OCWI core bundle/)
+  assert.ok(rejection, 'a stalled dynamic load must reject queued handles after the watchdog')
+  assert.match(rejection.message, /OCWI core bundle/)
+  assert.ok(harness.warnings.some((message) => message.includes('OCWI core bundle')))
+}
+
+// D2 (issue #7): a normal dynamic onload must NOT let the watchdog later fire a
+// spurious timeout. After the core loads, draining the timer queue is a no-op:
+// meta.error stays unset and the load remains successful.
+{
+  const harness = runLoader({ readyState: 'complete', appendLoads: true })
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
+
+  harness.flushTimers()
+  await Promise.resolve()
+
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
+  assert.equal(harness.context.window.OCWI_LOADER.error, undefined)
+}
+
 // --- Issue #5: exact-version pin + Subresource Integrity + immutable caching ---
 
 // sha384 of the ASCII string "ocwi-loader-sri-fixture": a real, reproducible hash
