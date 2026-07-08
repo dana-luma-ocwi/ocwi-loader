@@ -141,18 +141,11 @@
     }
 
     script.onload = function () {
-      meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
-      meta.loadedAt = new Date().toISOString();
-      root.__OCWI_LOADER_LOADING__ = false;
-      replayDeferredQueue();
+      markCoreLoaded();
     };
 
     script.onerror = function () {
-      var error = new Error('Failed to load OCWI core bundle: ' + src);
-      meta.error = error.message;
-      root.__OCWI_LOADER_LOADING__ = false;
-      failDeferredProxy(error);
-      warn(error.message);
+      markCoreError(new Error('Failed to load OCWI core bundle: ' + src));
     };
 
     var target = doc.head || doc.documentElement || doc.body;
@@ -219,6 +212,22 @@
       queue[i].handle.reject(error);
     }
     queue.length = 0;
+  }
+
+  // Shared success/failure bookkeeping for both injection paths, so the dynamic
+  // onload/onerror and the document.write poll stay in lockstep.
+  function markCoreLoaded() {
+    meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
+    meta.loadedAt = new Date().toISOString();
+    root.__OCWI_LOADER_LOADING__ = false;
+    replayDeferredQueue();
+  }
+
+  function markCoreError(error) {
+    meta.error = error.message;
+    root.__OCWI_LOADER_LOADING__ = false;
+    failDeferredProxy(error);
+    warn(error.message);
   }
 
   function createDeferredHandle() {
@@ -309,36 +318,27 @@
     }
   }
 
-  // The document.write path has no script element to attach onerror to (the core
-  // <script> is parser-inserted), so a 404/CSP block cannot be observed directly.
-  // Re-poll a bounded number of times: a successful load is recorded and queued
-  // handles replayed, and exhausting the budget surfaces a timeout error instead of
-  // hanging with the loading lock stuck true. The budget is long enough that a slow
-  // but successful parser-blocking load is not falsely failed.
-  function pollForLoaded(attemptsLeft) {
+  // A parser-inserted core <script> has no element to attach onerror to, so the
+  // document.write path detects success/failure by a bounded re-poll instead. The
+  // first check runs immediately (the parser-blocking core usually registers at
+  // once); retries back off, and exhausting the budget surfaces a timeout.
+  function pollForLoaded() {
     if (!root.setTimeout) return;
-    if (attemptsLeft === undefined) attemptsLeft = CORE_POLL_MAX_ATTEMPTS;
 
-    root.setTimeout(function () {
-      meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
-      if (meta.loaded) {
-        meta.loadedAt = new Date().toISOString();
-        root.__OCWI_LOADER_LOADING__ = false;
-        replayDeferredQueue();
-        return;
-      }
-
-      if (attemptsLeft > 0) {
-        pollForLoaded(attemptsLeft - 1);
-        return;
-      }
-
-      var error = new Error('Timed out waiting for OCWI core bundle to load: ' + coreUrl);
-      meta.error = error.message;
-      root.__OCWI_LOADER_LOADING__ = false;
-      failDeferredProxy(error);
-      warn(error.message);
-    }, CORE_POLL_INTERVAL_MS);
+    var attemptsLeft = CORE_POLL_MAX_ATTEMPTS;
+    (function tick(first) {
+      root.setTimeout(function () {
+        if (isRealOcwi(root[GLOBAL_NAME])) {
+          markCoreLoaded();
+          return;
+        }
+        if (attemptsLeft-- > 0) {
+          tick(false);
+          return;
+        }
+        markCoreError(new Error('Timed out waiting for OCWI core bundle to load: ' + coreUrl));
+      }, first ? 0 : CORE_POLL_INTERVAL_MS);
+    })(true);
   }
 
   function isRealOcwi(value) {
