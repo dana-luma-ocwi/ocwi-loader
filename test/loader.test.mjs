@@ -21,15 +21,9 @@ function makeScript(attrs = {}) {
   }
 }
 
-// Builds one browser "page": a single window/document that survives across every
-// loader instance run against it. Two capabilities the old harness lacked:
-//   - a DEFERRED fake timer (queue callbacks, flush on demand) so a test can
-//     register the core global first and then observe the pollForLoaded outcome.
-//     A synchronous setTimeout fired the poll before the core could register,
-//     permanently hiding the document.write load outcome.
-//   - a shared-window runner (run) that executes the loader again in the SAME
-//     context, so two loader <script> tags on one page can be modeled for real
-//     instead of faked by seeding window state.
+// One browser "page": a shared window/document plus a deferred fake timer
+// (flushTimers drains queued callbacks) and a run() that re-executes the loader
+// in the same context so multiple loader tags on one page can be modeled.
 function createHarness({
   readyState = 'loading',
   appendLoads = false,
@@ -55,7 +49,6 @@ function createHarness({
       },
       setTimeout(callback) {
         timers.push(callback)
-        return timers.length
       },
     },
     document: null,
@@ -117,8 +110,7 @@ function createHarness({
     for (const callback of pending) callback()
   }
 
-  function run({ attrs = {}, readyState: nextReadyState } = {}) {
-    if (nextReadyState !== undefined) document.readyState = nextReadyState
+  function run({ attrs = {} } = {}) {
     document.currentScript = makeScript(attrs)
     vm.runInContext(loaderSource, context)
   }
@@ -397,14 +389,9 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.match(rejected.message, /createElement/)
 }
 
-// H1 (issue #15): with a DEFERRED fake timer the document.write load OUTCOME is
-// observable. The loader writes a parser-blocking core <script>, queues the poll,
-// and returns with meta.loaded still false. Only after the core registers
-// window.OCWI and the queued poll runs does meta.loaded flip and the loading lock
-// clear. Under the old synchronous setTimeout the poll fired before the test
-// could register the core, so this outcome could never be asserted (the root
-// cause of the #6 / #7 invisibility). This is the red-first case: against the
-// old sync-timer harness `timers.length` is 0 and meta.loaded never flips.
+// H1: document.write path. pollForLoaded queues a real timer; the load outcome
+// (meta.loaded, loading lock) settles only after the core registers window.OCWI
+// and the queued poll is flushed - hence register-then-flush ordering below.
 {
   const { context, writes, timers, flushTimers } = runLoader({ readyState: 'loading' })
   assert.equal(writes.length, 1)
@@ -420,13 +407,8 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(context.window.__OCWI_LOADER_LOADING__, false)
 }
 
-// H2 (issue #15): two loader <script> tags on ONE page. The shared-window runner
-// executes the loader twice against the same window/document. The first tag takes
-// the document.write path and installs the deferred proxy; the second must detect
-// the in-flight load (__OCWI_LOADER_LOADING__) and NOT write or inject the core
-// again, keeping a single shared proxy. The old fresh-window-per-run harness gave
-// each tag its own window, so this dedup could only be faked by seeding state
-// (see G10); now it is exercised for real.
+// H2: two loader tags on one page. The second run must detect the in-flight load
+// and not write or inject the core again, keeping a single shared proxy.
 {
   const harness = runLoader({ readyState: 'loading' })
   assert.equal(harness.writes.length, 1)
