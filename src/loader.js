@@ -9,6 +9,8 @@
   var DEFAULT_CORE_SRI = __OCWI_CORE_SRI__;
   var GLOBAL_NAME = 'OCWI';
   var META_NAME = 'OCWI_LOADER';
+  var CORE_POLL_INTERVAL_MS = 250;
+  var CORE_POLL_MAX_ATTEMPTS = 40;
 
   var root = typeof window !== 'undefined' ? window : globalThis;
   var doc = root.document;
@@ -303,16 +305,36 @@
     }
   }
 
-  function pollForLoaded() {
+  // The document.write path has no script element to attach onerror to (the core
+  // <script> is parser-inserted), so a 404/CSP block cannot be observed directly.
+  // Re-poll a bounded number of times: a successful load is recorded and queued
+  // handles replayed, and exhausting the budget surfaces a timeout error instead of
+  // hanging with the loading lock stuck true. The budget is long enough that a slow
+  // but successful parser-blocking load is not falsely failed.
+  function pollForLoaded(attemptsLeft) {
     if (!root.setTimeout) return;
+    if (attemptsLeft === undefined) attemptsLeft = CORE_POLL_MAX_ATTEMPTS;
 
     root.setTimeout(function () {
       meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
       if (meta.loaded) {
         meta.loadedAt = new Date().toISOString();
         root.__OCWI_LOADER_LOADING__ = false;
+        replayDeferredQueue();
+        return;
       }
-    }, 0);
+
+      if (attemptsLeft > 0) {
+        pollForLoaded(attemptsLeft - 1);
+        return;
+      }
+
+      var error = new Error('Timed out waiting for OCWI core bundle to load: ' + coreUrl);
+      meta.error = error.message;
+      root.__OCWI_LOADER_LOADING__ = false;
+      failDeferredProxy(error);
+      warn(error.message);
+    }, CORE_POLL_INTERVAL_MS);
   }
 
   function isRealOcwi(value) {

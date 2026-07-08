@@ -431,6 +431,56 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
 }
 
+// H3 (issue #6): document.write path, the core script never registers window.OCWI
+// (a 404/CSP block the parser-inserted script cannot report). The bounded re-poll
+// must surface the failure - set meta.error, clear the loading lock, and reject
+// queued handles - instead of hanging with __OCWI_LOADER_LOADING__ stuck true.
+{
+  const harness = runLoader({ readyState: 'loading' })
+  assert.equal(harness.writes.length, 1)
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'document.write')
+
+  const handle = harness.context.window.OCWI('#chat')
+  let rejection = null
+  handle.ready.catch((error) => {
+    rejection = error
+  })
+
+  let guard = 200
+  while (harness.context.window.__OCWI_LOADER_LOADING__ && guard-- > 0) {
+    harness.flushTimers()
+  }
+  await Promise.resolve()
+
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, false)
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
+  assert.match(harness.context.window.OCWI_LOADER.error, /OCWI core bundle/)
+  assert.ok(rejection, 'a doc.write load that never registers the core must reject queued handles')
+  assert.match(rejection.message, /OCWI core bundle/)
+}
+
+// H4 (issue #6): document.write success flushes queued handles too. A call queued
+// on the proxy before the core registers must resolve once the poll observes the
+// real widget, mirroring the dynamic path's onload replay.
+{
+  const harness = runLoader({ readyState: 'loading' })
+  const handle = harness.context.window.OCWI('#chat')
+
+  harness.context.window.OCWI = function realWidget() {
+    return {
+      getState() {
+        return { ok: true }
+      },
+    }
+  }
+  harness.flushTimers()
+
+  const real = await handle.ready
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
+  assert.deepEqual(real.getState(), { ok: true })
+}
+
 // --- Issue #5: exact-version pin + Subresource Integrity + immutable caching ---
 
 // sha384 of the ASCII string "ocwi-loader-sri-fixture": a real, reproducible hash
