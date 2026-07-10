@@ -274,6 +274,7 @@
   function createDeferredHandle() {
     var target = null;
     var pending = [];
+    var rejected = false;
     var settleReady;
     var rejectReady;
     var ready =
@@ -327,13 +328,23 @@
         if (settleReady) settleReady(realTarget);
       },
       reject: function (error) {
+        rejected = true;
         if (rejectReady) rejectReady(error);
       }
     };
 
+    // The real widget's methods return void, so forward for the side effect but always
+    // return publicHandle: the return shape must not flip between the queued (pre-load)
+    // and forwarded (post-load) paths, or chained calls throw once the core is real.
     function callOrQueue(method, argsLike) {
+      if (rejected) {
+        warn('OCWI ' + method + '() ignored: the core failed to load.');
+        return publicHandle;
+      }
+
       if (target && typeof target[method] === 'function') {
-        return target[method].apply(target, Array.prototype.slice.call(argsLike));
+        target[method].apply(target, Array.prototype.slice.call(argsLike));
+        return publicHandle;
       }
 
       pending.push({
@@ -341,7 +352,7 @@
         args: Array.prototype.slice.call(argsLike)
       });
 
-      return method === 'getState' ? null : publicHandle;
+      return publicHandle;
     }
 
     function flushPending() {

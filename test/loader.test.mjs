@@ -302,6 +302,51 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.deepEqual(handle.getState(), { updates: 1 })
 }
 
+// (#14a): once the core is loaded (target real, its updateConfig returns void like the
+// real widget), a handle method must keep returning the handle so chained calls that
+// worked during the load window do not start throwing after the core is real/cached.
+{
+  const { context, appended } = runLoader({ readyState: 'complete' })
+  const handle = context.window.OCWI('#chat')
+
+  context.window.OCWI = function OCWI() {
+    return {
+      updates: [],
+      updateConfig(value) {
+        this.updates.push(value)
+      },
+      getState() {
+        return { updates: this.updates.length }
+      },
+    }
+  }
+  appended[0].onload()
+  await handle.ready
+
+  const chained = handle.updateConfig({ a: 1 }).updateConfig({ b: 2 })
+  assert.equal(chained, handle, 'a post-load handle method must return the handle for chaining')
+  assert.deepEqual(handle.getState(), { updates: 2 })
+}
+
+// (#14b): after the handle is rejected (core load failed), a later method call must warn
+// and no-op, not silently queue onto a pending list that will never flush.
+{
+  const { context, appended, warnings } = runLoader({ readyState: 'complete' })
+  const handle = context.window.OCWI('#chat')
+  handle.ready.catch(() => {})
+
+  appended[0].onerror()
+  await Promise.resolve()
+
+  const warningsBefore = warnings.length
+  const returned = handle.updateConfig({ a: 1 })
+  assert.equal(returned, handle, 'a rejected handle still returns the handle for a no-op chain')
+  assert.ok(
+    warnings.slice(warningsBefore).some((message) => message.includes('updateConfig')),
+    'a method call on a rejected handle must warn',
+  )
+}
+
 // Core bundle network failure (404 / 5xx): the browser fires the injected
 // script's onerror, which must reject deferred handles, record a diagnostic on
 // window.OCWI_LOADER, clear the loading lock, and warn. See src/loader.js:119-125.
