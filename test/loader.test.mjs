@@ -181,6 +181,44 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.ok(warnings.some((message) => message.includes('Ignoring invalid OCWI core version')))
 }
 
+// (#13a): a mutable dist-tag other than 'latest' (e.g. 'beta', the advertised
+// staged-rollout path) must still get the hourly cache-buster, or jsDelivr's long
+// cache headers keep a stale bundle on pilot pages for days.
+{
+  const { writes, context } = runLoader({
+    attrs: {
+      'data-ocwi-version': 'beta',
+    },
+  })
+  assert.match(writes[0], /ocwi-core@beta\/dist\/ocwi\.min\.js\?ocwi-loader-cache=/)
+  assert.match(context.window.OCWI_LOADER.coreUrl, /ocwi-loader-cache=/)
+}
+
+// (#13b): a mixed-case dist-tag like 'Latest' is normalized to lowercase so the URL
+// resolves - npm dist-tags are case-sensitive, so 'ocwi-core@Latest' would 404.
+{
+  const { writes, context } = runLoader({
+    attrs: {
+      'data-ocwi-version': 'Latest',
+    },
+  })
+  assert.doesNotMatch(writes[0], /@Latest/)
+  assert.doesNotMatch(context.window.OCWI_LOADER.coreUrl, /@Latest/)
+  assert.equal(context.window.OCWI_LOADER.coreVersion, 'latest')
+}
+
+// (#13c): regression guard - an exact semver stays immutable (no cache-buster).
+{
+  const { writes, context } = runLoader({
+    attrs: {
+      'data-ocwi-version': '1.2.3',
+    },
+  })
+  assert.match(writes[0], /ocwi-core@1\.2\.3\/dist\/ocwi\.min\.js/)
+  assert.doesNotMatch(writes[0], /ocwi-loader-cache=/)
+  assert.doesNotMatch(context.window.OCWI_LOADER.coreUrl, /ocwi-loader-cache=/)
+}
+
 {
   const { writes, context } = runLoader({
     attrs: {

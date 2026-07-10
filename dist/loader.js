@@ -85,7 +85,10 @@
     var cdnBase = stripTrailingSlash(readAttr(script, 'data-ocwi-cdn-base') || DEFAULT_CDN_BASE);
     var coreUrl = cdnBase + '/' + packageName + '@' + version + '/' + coreFile;
 
-    return isLatestVersion(version) ? appendCacheBuster(coreUrl) : coreUrl;
+    // Only an exact semver is immutable on jsDelivr; every dist-tag (latest, beta,
+    // next) is mutable and served with long cache headers, so it must carry the
+    // hourly buster or a stale bundle sticks in the browser for days.
+    return isExactVersion(version) ? coreUrl : appendCacheBuster(coreUrl);
   }
 
   // The baked hash matches only the exact pinned bundle, so any override that
@@ -400,7 +403,12 @@
   function normalizeVersion(value) {
     var version = String(value || '').trim();
     if (!version) return '';
-    if (/^[A-Za-z0-9._~+-]+$/.test(version)) return version;
+    if (/^[A-Za-z0-9._~+-]+$/.test(version)) {
+      // npm dist-tags are case-sensitive and canonically lowercase, so a mixed-case
+      // tag like 'Latest' would build a 404 URL. An exact semver is left untouched:
+      // published versions are case-sensitive and may carry pre-release identifiers.
+      return isExactVersion(version) ? version : version.toLowerCase();
+    }
 
     warn('Ignoring invalid OCWI core version override: ' + version);
     return '';
@@ -409,6 +417,10 @@
   // Mirror of isLatest() in scripts/build.mjs; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
   function isLatestVersion(version) {
     return String(version || '').toLowerCase() === 'latest';
+  }
+
+  function isExactVersion(version) {
+    return /^\d+\.\d+\.\d+([-+].*)?$/.test(String(version || '').trim());
   }
 
   function appendCacheBuster(url) {
