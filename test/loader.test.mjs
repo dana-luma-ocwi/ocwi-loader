@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { buildLoaderSource } from '../scripts/build.mjs'
+import { gzipSync } from 'node:zlib'
+import { buildLoaderSource, GZIP_BUDGET_BYTES } from '../scripts/build.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const loaderSource = await readFile(path.join(root, 'dist', 'loader.js'), 'utf8')
@@ -788,5 +789,16 @@ await assert.rejects(
   buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION, OCWI_CORE_SRI: 'not-a-real-sri' }),
   /not a valid Subresource Integrity/,
 )
+
+// P7 (#16): dist/loader.js is the parser-blocking entrypoint on every customer page, so
+// the shipped artifact must stay minified and under the gzipped byte budget. An
+// unminified or bloated bundle fails this assert (and the build itself).
+{
+  const distBytes = gzipSync(loaderSource).length
+  assert.ok(
+    distBytes <= GZIP_BUDGET_BYTES,
+    `dist/loader.js is ${distBytes} B gzipped, over the ${GZIP_BUDGET_BYTES} B budget - is it minified?`,
+  )
+}
 
 console.log('loader tests passed')

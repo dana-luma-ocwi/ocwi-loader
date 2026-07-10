@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gzipSync } from 'node:zlib'
+import { minify } from 'terser'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagePath = path.join(root, 'package.json')
@@ -9,6 +11,11 @@ const distDir = path.join(root, 'dist')
 const distPath = path.join(distDir, 'loader.js')
 
 const SRI_PATTERN = /^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$/
+
+// dist/loader.js is the permanently-embedded, parser-blocking script on every customer
+// page, so its shipped bytes are guarded. The build fails if the gzipped artifact grows
+// past this budget (current minified size ~2.2 KB); bump it only as a deliberate decision.
+export const GZIP_BUDGET_BYTES = 3072
 
 // Mirror of isLatestVersion() in src/loader.js; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
 function isLatest(version) {
@@ -65,6 +72,13 @@ export async function buildLoaderSource(pkg, env = {}) {
     source = source.split(token).join(value)
   }
 
+  const minified = await minify(source, {
+    compress: true,
+    mangle: true,
+    format: { comments: false },
+  })
+  if (minified.error) throw minified.error
+
   const banner = [
     `/*! ${pkg.name} v${pkg.version}`,
     ` * core: ${resolved.corePackage}@${resolved.coreVersion}${resolved.coreSri ? ' (SRI-pinned)' : ''}`,
@@ -73,7 +87,7 @@ export async function buildLoaderSource(pkg, env = {}) {
     '',
   ].join('\n')
 
-  return banner + source
+  return banner + minified.code
 }
 
 async function main() {
@@ -83,7 +97,16 @@ async function main() {
   await mkdir(distDir, { recursive: true })
   await writeFile(distPath, output, 'utf8')
 
-  console.log(`Built ${path.relative(root, distPath)}`)
+  const gzipBytes = gzipSync(output).length
+  if (gzipBytes > GZIP_BUDGET_BYTES) {
+    throw new Error(
+      `ocwi-loader build: dist/loader.js is ${gzipBytes} B gzipped, over the ${GZIP_BUDGET_BYTES} B budget for the parser-blocking entrypoint. Trim the loader or raise GZIP_BUDGET_BYTES deliberately.`,
+    )
+  }
+
+  console.log(
+    `Built ${path.relative(root, distPath)} (${gzipBytes} B gzipped, budget ${GZIP_BUDGET_BYTES} B)`,
+  )
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

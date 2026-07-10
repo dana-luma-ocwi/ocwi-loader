@@ -16,5 +16,8 @@
     "coreVersion": "latest",
     "coreFile": "dist/ocwi.min.js",
     "cdnBase": "https://cdn.jsdelivr.net/npm"
+  },
+  "devDependencies": {
+    "terser": "^5.44.1"
   }
 }
