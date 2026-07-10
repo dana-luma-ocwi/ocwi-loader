@@ -321,6 +321,53 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(handle.getState(), null)
 }
 
+// G15 (#12): the core script loads (onload fires) but never registers window.OCWI
+// (a wrong data-ocwi-src, or a core build that drops the IIFE global). With NO queued
+// calls the failure must still surface - meta.error set and a warning - not silence.
+{
+  const { context, appended, warnings } = runLoader({ readyState: 'complete' })
+  assert.equal(appended.length, 1)
+  assert.equal(context.window.OCWI.__ocwiLoaderProxy, true)
+
+  appended[0].onload()
+
+  assert.match(context.window.OCWI_LOADER.error, /was not registered/)
+  assert.equal(context.window.OCWI_LOADER.loaded, false)
+  assert.equal(context.window.__OCWI_LOADER_LOADING__, false)
+  assert.ok(warnings.some((message) => message.includes('was not registered')))
+}
+
+// G16 (#12): same onload-but-unregistered failure with a queued call. The queued
+// handle must reject, and a NEW OCWI() call afterwards must fail-fast (its .ready
+// rejects) via the recorded meta.error rather than queue forever behind a proxy
+// nothing will ever replay.
+{
+  const { context, appended, warnings } = runLoader({ readyState: 'complete' })
+
+  const queued = context.window.OCWI('#chat')
+  let queuedRejection = null
+  queued.ready.catch((error) => {
+    queuedRejection = error
+  })
+
+  appended[0].onload()
+  await Promise.resolve()
+
+  assert.match(context.window.OCWI_LOADER.error, /was not registered/)
+  assert.ok(warnings.some((message) => message.includes('was not registered')))
+  assert.ok(queuedRejection, 'a handle queued before an unregistered load must reject')
+  assert.match(queuedRejection.message, /was not registered/)
+
+  const later = context.window.OCWI('#chat')
+  let laterRejection = null
+  later.ready.catch((error) => {
+    laterRejection = error
+  })
+  await Promise.resolve()
+  assert.ok(laterRejection, 'a handle created after an unregistered load must fail-fast')
+  assert.match(laterRejection.message, /was not registered/)
+}
+
 // G9: already-loaded short-circuit. When window.OCWI is already the real widget
 // fn, the loader records meta.loaded/already-loaded and returns without injecting.
 {

@@ -224,12 +224,16 @@
     var queue = root.__OCWI_LOADER_QUEUE__;
     var realOcwi = root[GLOBAL_NAME];
 
-    if (!queue || !queue.length) return;
-
+    // A core that executes without registering window.OCWI is a permanent failure,
+    // so record it before the empty-queue early return: otherwise, with nothing
+    // queued, no meta.error/warn surfaces and later OCWI() calls queue forever
+    // behind the proxy (its fail-fast only triggers once meta.error is set).
     if (!isRealOcwi(realOcwi)) {
-      failDeferredProxy(new Error('OCWI core loaded but window.OCWI was not registered.'));
+      markCoreError(new Error('OCWI core loaded but window.OCWI was not registered.'));
       return;
     }
+
+    if (!queue || !queue.length) return;
 
     for (var i = 0; i < queue.length; i += 1) {
       try {
