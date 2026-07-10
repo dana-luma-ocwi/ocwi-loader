@@ -349,6 +349,44 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(context.window.OCWI.__ocwiLoaderProxy, true)
 }
 
+// G13 (#11): a second loader tag on the same page must not overwrite the first
+// tag's diagnostics for the core that is actually running. First tag loads core
+// 1.2.3; a later tag pinned to 2.0.0 (which loads nothing) is recorded separately
+// and warns, leaving coreVersion/coreUrl/mode still describing 1.2.3.
+{
+  const harness = createHarness({ readyState: 'complete', appendLoads: true })
+  harness.run({ attrs: { 'data-ocwi-version': '1.2.3' } })
+  assert.equal(harness.context.window.OCWI_LOADER.coreVersion, '1.2.3')
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+
+  harness.run({ attrs: { 'data-ocwi-version': '2.0.0' } })
+  assert.equal(harness.context.window.OCWI_LOADER.coreVersion, '1.2.3')
+  assert.match(harness.context.window.OCWI_LOADER.coreUrl, /ocwi-core@1\.2\.3\//)
+  assert.notEqual(harness.context.window.OCWI_LOADER.mode, 'pending')
+  // ignoredInstances is allocated inside the vm realm, so compare its primitives
+  // rather than deep-equalling arrays across realms (different Array.prototype).
+  const ignored = harness.context.window.OCWI_LOADER.ignoredInstances
+  assert.equal(ignored.length, 1)
+  assert.equal(ignored[0].coreVersion, '2.0.0')
+  assert.ok(
+    harness.warnings.some((message) => message.includes('2.0.0') && message.includes('1.2.3')),
+    'a version mismatch between loader tags must warn',
+  )
+}
+
+// G14 (#11): while the first tag is still loading, a second tag must not regress
+// mode from 'dynamic' back to 'pending'.
+{
+  const harness = createHarness({ readyState: 'complete', appendLoads: false })
+  harness.run({ attrs: { 'data-ocwi-version': '1.2.3' } })
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, true)
+
+  harness.run({ attrs: { 'data-ocwi-version': '2.0.0' } })
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+  assert.equal(harness.context.window.OCWI_LOADER.coreVersion, '1.2.3')
+}
+
 // G11: data-ocwi-package / -cdn-base / -file resolve into the core URL (a concrete
 // version means no cache-buster).
 {

@@ -27,17 +27,26 @@
   var coreSri = resolveCoreSri(coreUrl, coreVersion);
   var scriptNonce = readNonce(currentScript);
   var meta = (root[META_NAME] = root[META_NAME] || {});
+  var alreadyLoaded = isRealOcwi(root[GLOBAL_NAME]);
 
-  meta.loaderVersion = LOADER_VERSION;
-  meta.corePackage = corePackage;
-  meta.coreVersion = coreVersion;
-  meta.coreUrl = coreUrl;
-  if (coreSri) meta.coreSri = coreSri;
-  meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
-  meta.mode = meta.loaded ? 'already-loaded' : 'pending';
-  meta.startedAt = new Date().toISOString();
+  // The first loader instance to run owns the descriptive meta; a second tag on the
+  // same page (e.g. a pinned snippet next to a default one) must not rewrite the
+  // version/URL/mode of the core that is actually running, or diagnostics lie. Later
+  // instances are recorded separately and warned on a version mismatch instead.
+  if (meta.startedAt) {
+    recordSecondaryInstance();
+  } else {
+    meta.loaderVersion = LOADER_VERSION;
+    meta.corePackage = corePackage;
+    meta.coreVersion = coreVersion;
+    meta.coreUrl = coreUrl;
+    if (coreSri) meta.coreSri = coreSri;
+    meta.loaded = alreadyLoaded;
+    meta.mode = alreadyLoaded ? 'already-loaded' : 'pending';
+    meta.startedAt = new Date().toISOString();
+  }
 
-  if (meta.loaded) return;
+  if (alreadyLoaded) return;
 
   if (root.__OCWI_LOADER_LOADING__) {
     installDeferredProxy();
@@ -195,6 +204,20 @@
     proxy.__ocwiLoaderProxy = true;
     proxy.__ocwiLoaderQueue = queue;
     root[GLOBAL_NAME] = proxy;
+  }
+
+  function recordSecondaryInstance() {
+    var instances = meta.ignoredInstances || (meta.ignoredInstances = []);
+    instances.push({ coreVersion: coreVersion, coreUrl: coreUrl });
+
+    if (coreVersion !== meta.coreVersion) {
+      warn(
+        'A second OCWI loader tag requests core version "' + coreVersion +
+          '" but version "' + meta.coreVersion + '" is already ' +
+          (alreadyLoaded ? 'loaded' : 'loading') +
+          '; the first tag wins and this one is ignored.'
+      );
+    }
   }
 
   function replayDeferredQueue() {
