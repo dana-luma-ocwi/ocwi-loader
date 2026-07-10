@@ -141,6 +141,7 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
     `https://cdn.jsdelivr.net/npm/ocwi-core@latest/dist/ocwi.min.js?ocwi-loader-cache=${cacheBucket}`,
   )
   assert.equal(context.window.OCWI_LOADER.mode, 'document.write')
+  assert.doesNotMatch(writes[0], /""/)
 }
 
 {
@@ -198,6 +199,7 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
     },
   })
   assert.match(writes[0], /nonce="nonce-123"/)
+  assert.doesNotMatch(writes[0], /""/)
 
   const dynamic = runLoader({
     readyState: 'complete',
