@@ -703,6 +703,69 @@ function runLoader({ attrs = {}, readyState = 'loading', ...rest } = {}) {
   assert.equal(harness.context.window.OCWI_LOADER.error, undefined)
 }
 
+// D3 (issue #19): the dynamic watchdog fires FIRST (the load timed out), and only
+// THEN a late onload arrives (the slow request finally completed and registered the
+// core). markCoreLoaded must be a no-op once the load already settled as an error,
+// so the diagnostics stay loaded:false + error - never the contradictory loaded:true
+// WITH a lingering error - and the pre-timeout handle stays rejected.
+{
+  const harness = runLoader({ readyState: 'complete' })
+  assert.equal(harness.appended.length, 1)
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+
+  const handle = harness.context.window.OCWI('#chat')
+  let rejection = null
+  handle.ready.catch((error) => {
+    rejection = error
+  })
+
+  // Watchdog fires first: the stalled load settles as a timeout error.
+  harness.flushTimers()
+  await Promise.resolve()
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, false)
+  assert.equal(harness.context.window.__OCWI_LOADER_LOADING__, false)
+  assert.match(harness.context.window.OCWI_LOADER.error, /OCWI core bundle/)
+  assert.ok(rejection, 'the pre-timeout handle must reject when the watchdog fires')
+  const errorAfterTimeout = harness.context.window.OCWI_LOADER.error
+
+  // Late onload arrives AFTER the timeout: the slow core finally registered.
+  harness.context.window.OCWI = function realWidget() {}
+  harness.appended[0].onload()
+  await Promise.resolve()
+
+  // The late onload must NOT flip the already-settled error diagnostics.
+  assert.equal(
+    harness.context.window.OCWI_LOADER.loaded,
+    false,
+    'a late onload must not overwrite a timed-out load to loaded:true',
+  )
+  assert.equal(
+    harness.context.window.OCWI_LOADER.error,
+    errorAfterTimeout,
+    'the recorded timeout error must survive a late onload',
+  )
+  assert.equal(
+    harness.context.window.OCWI_LOADER.loadedAt,
+    undefined,
+    'a timed-out load must not be stamped with loadedAt by a late onload',
+  )
+}
+
+// D4 (issue #19 nit): an onload that resolves to an unregistered global is a FAILED
+// load, so it must not leave a cosmetic loadedAt alongside meta.error / loaded:false.
+{
+  const { context, appended } = runLoader({ readyState: 'complete' })
+  appended[0].onload()
+
+  assert.equal(context.window.OCWI_LOADER.loaded, false)
+  assert.match(context.window.OCWI_LOADER.error, /was not registered/)
+  assert.equal(
+    context.window.OCWI_LOADER.loadedAt,
+    undefined,
+    'a failed (unregistered) load must not stamp loadedAt',
+  )
+}
+
 // --- Issue #5: exact-version pin + Subresource Integrity + immutable caching ---
 
 // sha384 of the ASCII string "ocwi-loader-sri-fixture": a real, reproducible hash

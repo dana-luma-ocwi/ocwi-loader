@@ -258,9 +258,17 @@
   // Shared success/failure bookkeeping for both injection paths, so the dynamic
   // onload/onerror and the document.write poll stay in lockstep.
   function markCoreLoaded() {
-    meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
-    meta.loadedAt = new Date().toISOString();
+    // A late onload after the watchdog already timed out (or any settle that flipped
+    // the loading flag) must be inert: otherwise it flips meta.loaded/loadedAt back on
+    // while markCoreError has already recorded meta.error, leaving contradictory
+    // loaded:true+error diagnostics and a permanently rejected pre-timeout handle.
+    if (!root.__OCWI_LOADER_LOADING__) return;
     root.__OCWI_LOADER_LOADING__ = false;
+    meta.loaded = isRealOcwi(root[GLOBAL_NAME]);
+    // Stamp loadedAt only on a confirmed-successful load: an onload that resolves to a
+    // missing global delegates to replayDeferredQueue -> markCoreError, so a loadedAt
+    // here would sit next to meta.error on a load that never actually succeeded.
+    if (meta.loaded) meta.loadedAt = new Date().toISOString();
     replayDeferredQueue();
   }
 
