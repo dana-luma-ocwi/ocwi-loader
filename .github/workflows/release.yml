@@ -90,6 +90,9 @@ jobs:
             echo "dist/loader.js embeds the pinned SRI"
           fi
 
+      # No provenance/attestation is emitted: this token-based publish sets no
+      # `--provenance` and grants no `id-token: write`. Real supply-chain
+      # provenance needs npm trusted publishing, tracked by #8.
       - name: Publish to npm
         run: npm publish --access public
         env:
