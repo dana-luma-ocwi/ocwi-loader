@@ -429,11 +429,13 @@
     return '';
   }
 
-  // Mirror of isLatest() in scripts/build.mjs; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
+  // Runtime-only helper: 'latest' is the one dist-tag whose baked SRI is dropped at
+  // resolve time (see resolveCoreSri). The build guards mutability via isExactVersion.
   function isLatestVersion(version) {
     return String(version || '').toLowerCase() === 'latest';
   }
 
+  // Mirror of isExactVersion() in scripts/build.mjs; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
   function isExactVersion(version) {
     return /^\d+\.\d+\.\d+([-+].*)?$/.test(String(version || '').trim());
   }

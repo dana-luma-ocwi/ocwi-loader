@@ -846,11 +846,44 @@ await assert.rejects(
 )
 await assert.rejects(
   buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'latest', OCWI_CORE_SRI: FIXTURE_SRI }),
-  /cannot be combined with coreVersion 'latest'/,
+  /cannot be combined with the mutable coreVersion 'latest'/,
 )
 await assert.rejects(
   buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION, OCWI_CORE_SRI: 'not-a-real-sri' }),
   /not a valid Subresource Integrity/,
+)
+
+// --- Issue #17: the SRI-vs-mutable build guard must cover every mutable dist-tag ---
+
+// A dist-tag other than 'latest' (e.g. 'beta') is just as mutable, so pairing it with an
+// SRI bakes a hash onto a moving tag - the same contradiction #5 guarded for 'latest'.
+// The build must reject it, and name the offending version rather than always blaming
+// 'latest'.
+await assert.rejects(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta', OCWI_CORE_SRI: FIXTURE_SRI }),
+  /cannot be combined with the mutable coreVersion 'beta'/,
+)
+
+// The inverse is legitimate: a mutable dist-tag WITHOUT an SRI is the explicit mutable
+// opt-in (exactly like 'latest'), so the build must accept it and emit the mutable runtime
+// shape (cache-buster, no integrity), never demand an SRI.
+await assert.doesNotReject(buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta' }))
+{
+  const betaSource = await buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta' })
+  const { writes } = runLoader({ readyState: 'loading', source: betaSource })
+  assert.match(writes[0], /ocwi-core@beta\//)
+  assert.match(writes[0], /ocwi-loader-cache=/)
+  assert.doesNotMatch(writes[0], /integrity=/)
+}
+
+// The exact-semver happy path stays accepted and 'latest' + SRI stays rejected, so the
+// whole mutable-vs-exact family is pinned down in one place.
+await assert.doesNotReject(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION, OCWI_CORE_SRI: FIXTURE_SRI }),
+)
+await assert.rejects(
+  buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'latest', OCWI_CORE_SRI: FIXTURE_SRI }),
+  /cannot be combined with the mutable coreVersion 'latest'/,
 )
 
 // P7 (#16): dist/loader.js is the parser-blocking entrypoint on every customer page, so

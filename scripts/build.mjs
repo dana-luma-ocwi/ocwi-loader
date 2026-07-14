@@ -17,15 +17,15 @@ const SRI_PATTERN = /^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$/
 // past this budget (current minified size ~2.2 KB); bump it only as a deliberate decision.
 export const GZIP_BUDGET_BYTES = 3072
 
-// Mirror of isLatestVersion() in src/loader.js; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
-function isLatest(version) {
-  return String(version || '').toLowerCase() === 'latest'
+// Mirror of isExactVersion() in src/loader.js; keep the two in sync (the inlined IIFE loader cannot share a module with the build).
+function isExactVersion(version) {
+  return /^\d+\.\d+\.\d+([-+].*)?$/.test(String(version || '').trim())
 }
 
 // Resolves and validates the core pin. Fails loudly so a release can never ship an
-// exact version without a matching SRI (an unverified pin) or a mutable 'latest'
-// tag carrying a stale hash. 'latest' is the explicit mutable opt-in and takes no
-// SRI, because the hash of a moving tag is unknown by design.
+// exact version without a matching SRI (an unverified pin) or a mutable dist-tag
+// (latest, beta, next, ...) carrying a stale hash. A mutable dist-tag is the explicit
+// mutable opt-in and takes no SRI, because the hash of a moving tag is unknown by design.
 export function resolveCoreConfig(pkg, env = {}) {
   const config = pkg.ocwiLoader ?? {}
   const corePackage = env.OCWI_CORE_PACKAGE || config.corePackage
@@ -34,9 +34,9 @@ export function resolveCoreConfig(pkg, env = {}) {
   const cdnBase = env.OCWI_CDN_BASE || config.cdnBase
   const coreSri = String(env.OCWI_CORE_SRI ?? config.coreSri ?? '').trim()
 
-  if (coreSri && isLatest(coreVersion)) {
+  if (coreSri && !isExactVersion(coreVersion)) {
     throw new Error(
-      "ocwi-loader build: OCWI_CORE_SRI cannot be combined with coreVersion 'latest' - a mutable tag has no stable hash. Pin an exact version, or drop the SRI for the mutable opt-in.",
+      `ocwi-loader build: OCWI_CORE_SRI cannot be combined with the mutable coreVersion '${coreVersion}' - a mutable dist-tag has no stable hash. Pin an exact version, or drop the SRI for the mutable opt-in.`,
     )
   }
   if (coreSri && !SRI_PATTERN.test(coreSri)) {
@@ -44,11 +44,11 @@ export function resolveCoreConfig(pkg, env = {}) {
       `ocwi-loader build: OCWI_CORE_SRI '${coreSri}' is not a valid Subresource Integrity value (expected e.g. sha384-<base64>).`,
     )
   }
-  if (!coreSri && !isLatest(coreVersion)) {
+  if (!coreSri && isExactVersion(coreVersion)) {
     throw new Error(
       `ocwi-loader build: pinning ocwi-core@${coreVersion} requires OCWI_CORE_SRI (sha384-...). Derive it from the exact published bundle, for example:\n` +
         `  curl -fsSL "${cdnBase}/${corePackage}@${coreVersion}/${coreFile}" | openssl dgst -sha384 -binary | openssl base64 -A\n` +
-        `then prefix 'sha384-'. Or build coreVersion 'latest' for the explicit mutable opt-in.`,
+        `then prefix 'sha384-'. Or build a mutable dist-tag such as 'latest' for the explicit mutable opt-in.`,
     )
   }
 
