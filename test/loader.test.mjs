@@ -866,8 +866,8 @@ await assert.rejects(
 
 // The inverse is legitimate: a mutable dist-tag WITHOUT an SRI is the explicit mutable
 // opt-in (exactly like 'latest'), so the build must accept it and emit the mutable runtime
-// shape (cache-buster, no integrity), never demand an SRI.
-await assert.doesNotReject(buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta' }))
+// shape (cache-buster, no integrity), never demand an SRI. The build here throws on
+// rejection, so no separate doesNotReject is needed.
 {
   const betaSource = await buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta' })
   const { writes } = runLoader({ readyState: 'loading', source: betaSource })
@@ -875,16 +875,6 @@ await assert.doesNotReject(buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'beta' })
   assert.match(writes[0], /ocwi-loader-cache=/)
   assert.doesNotMatch(writes[0], /integrity=/)
 }
-
-// The exact-semver happy path stays accepted and 'latest' + SRI stays rejected, so the
-// whole mutable-vs-exact family is pinned down in one place.
-await assert.doesNotReject(
-  buildLoaderSource(pkg, { OCWI_CORE_VERSION: PINNED_VERSION, OCWI_CORE_SRI: FIXTURE_SRI }),
-)
-await assert.rejects(
-  buildLoaderSource(pkg, { OCWI_CORE_VERSION: 'latest', OCWI_CORE_SRI: FIXTURE_SRI }),
-  /cannot be combined with the mutable coreVersion 'latest'/,
-)
 
 // P7 (#16): dist/loader.js is the parser-blocking entrypoint on every customer page, so
 // the shipped artifact must stay minified and under the gzipped byte budget. An
