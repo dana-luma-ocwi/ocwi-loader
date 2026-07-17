@@ -23,6 +23,14 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 ```html
 <div id="ocwi-19" class="mount"></div>
 
+<script>
+  window.OCWI =
+    window.OCWI ||
+    function () {
+      ;(window.OCWI.q = window.OCWI.q || []).push(arguments)
+    }
+  window.OCWI.q = window.OCWI.q || []
+</script>
 <script src="https://cdn.amca.cz/ocwi/loader.js" async></script>
 <script>
   window.OCWI('#ocwi-19', {
@@ -33,7 +41,7 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 </script>
 ```
 
-The snippet shape is intentionally close to the previous `ocwi-core` CDN snippet: the first script URL points at the loader and carries `async` so neither the loader nor the core blocks the page parser.
+The snippet shape is intentionally close to the previous `ocwi-core` CDN snippet: the loader script carries `async` so neither the loader nor the core blocks the page parser. The first inline script installs a tiny synchronous queue-stub as `window.OCWI` so the call in the third script never throws, even though the `async` loader may not have run yet when it fires. The stub buffers calls on `window.OCWI.q`; the loader adopts and replays them once it runs. Keep the stub exactly as shown - it is required for the `async` snippet. A call made through the stub (before the loader runs) does not return a widget `.ready` handle.
 
 On the async path the core loads from `cdn.jsdelivr.net`, a different origin from the loader (`cdn.amca.cz`), so its connection is opened only after `loader.js` runs. Adding a preconnect hint to the page `<head>` lets the browser start that DNS/TCP/TLS setup earlier, saving roughly 100-300ms on a first visit:
 
@@ -48,7 +56,7 @@ On the async path the core loads from `cdn.jsdelivr.net`, a different origin fro
   `https://cdn.jsdelivr.net/npm/ocwi-core@<version>/dist/ocwi.min.js`
 - When the version is `latest`, the loader appends an hourly cache-busting query parameter:
   `?ocwi-loader-cache=<hour-bucket>`
-- Inline `window.OCWI(...)` calls that run before the core has loaded are captured by a deferred proxy that queues them and replays them (resolving each returned `.ready` promise) once the core registers, so the snippet's call shape is unchanged.
+- Inline `window.OCWI(...)` calls that run after the loader has executed but before the core has loaded are captured by a deferred proxy that queues them and replays them (resolving each returned `.ready` promise) once the core registers, so the snippet's call shape is unchanged. Calls that run before the loader itself executes (the common case on the `async` snippet) are captured earlier by the synchronous queue-stub in the snippet, which the loader adopts and drains into that same replay; those pre-loader calls run for their side effect but do not return a `.ready` handle.
 - A plain non-async `<script src=".../loader.js"></script>` (the older snippet) instead uses `document.write` to inject a parser-blocking core. That path is kept only for backward compatibility; prefer the `async` snippet.
 - Exact core versions remain immutable and cacheable. The `latest` URL changes hourly so browsers do not keep an old core bundle for days.
 - When the loader is built with an exact `ocwi-core` version and its Subresource Integrity hash, the inserted core script carries `integrity="sha384-..."` and `crossorigin="anonymous"`, so the browser refuses a tampered bundle. `latest` is the explicit mutable opt-in and carries no integrity, because a moving tag has no stable hash.

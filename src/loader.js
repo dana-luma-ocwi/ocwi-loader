@@ -187,6 +187,8 @@
     var queue = root.__OCWI_LOADER_QUEUE__ || [];
     root.__OCWI_LOADER_QUEUE__ = queue;
 
+    adoptStubQueue(queue);
+
     var proxy = function () {
       var handle = createDeferredHandle();
       if (meta.error) {
@@ -203,6 +205,27 @@
     proxy.__ocwiLoaderProxy = true;
     proxy.__ocwiLoaderQueue = queue;
     root[GLOBAL_NAME] = proxy;
+  }
+
+  // The documented async snippet installs a tiny synchronous stub as window.OCWI
+  // before loader.js runs, so inline OCWI(...) calls made while the loader is still
+  // downloading do not throw; the stub buffers each call's raw arguments on its .q
+  // array. Migrate those buffered calls into the deferred queue (ahead of any call
+  // that later lands on the proxy) so they replay in original order once the core
+  // registers, then let the proxy replace the stub. A stub call returned undefined,
+  // so these pre-load calls have no .ready handle to observe; replay is side-effect
+  // only, and a failed load still surfaces globally via meta.error and a warning.
+  function adoptStubQueue(queue) {
+    var stub = root[GLOBAL_NAME];
+    if (!isStub(stub)) return;
+
+    for (var i = 0; i < stub.q.length; i += 1) {
+      queue.push({
+        args: Array.prototype.slice.call(stub.q[i]),
+        handle: { resolve: noop, reject: noop }
+      });
+    }
+    stub.q.length = 0;
   }
 
   function recordSecondaryInstance() {
@@ -402,8 +425,20 @@
   }
 
   function isRealOcwi(value) {
-    return typeof value === 'function' && !value.__ocwiLoaderProxy;
+    return typeof value === 'function' && !value.__ocwiLoaderProxy && !isStub(value);
   }
+
+  // The async snippet's queue-stub is a plain function (not the loader's proxy) that
+  // carries a .q array of buffered call arguments. It must not be mistaken for the
+  // real core - that would short-circuit the load as already-loaded and drop the
+  // buffered calls - nor for the proxy.
+  function isStub(value) {
+    return (
+      typeof value === 'function' && !value.__ocwiLoaderProxy && Array.isArray(value.q)
+    );
+  }
+
+  function noop() {}
 
   function readAttr(el, name) {
     if (!el || !el.getAttribute) return '';

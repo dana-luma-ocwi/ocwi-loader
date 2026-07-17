@@ -876,6 +876,110 @@ await assert.rejects(
   assert.doesNotMatch(writes[0], /integrity=/)
 }
 
+// --- Issue #20: the async snippet's synchronous queue-stub is adopted ---
+
+// The documented async snippet installs a stub as window.OCWI before loader.js runs,
+// buffering inline OCWI(...) calls on window.OCWI.q. This is the EXACT preamble the
+// snippet ships: a lazy push stub plus an eager .q initialiser, so the stub is
+// detectable even before any inline call fires (an async loader can execute before
+// the inline call on a warm cache). runInContext keeps the stub in the vm realm so
+// its buffered `arguments` objects match what a real browser would hand the loader.
+function seedQueueStub(harness) {
+  vm.runInContext(
+    'window.OCWI=window.OCWI||function(){(window.OCWI.q=window.OCWI.q||[]).push(arguments)};window.OCWI.q=window.OCWI.q||[];',
+    harness.context,
+  )
+}
+
+// S1 (#20): a stub with buffered calls on the async/dynamic path. The loader must not
+// treat the stub as an already-loaded core; it adopts the buffered calls, replaces the
+// stub with its proxy, injects the core, and replays the buffered calls IN ORDER once
+// the core registers. A call that lands on the proxy after adoption replays after them.
+{
+  const harness = createHarness({ readyState: 'complete' })
+  seedQueueStub(harness)
+  harness.context.window.OCWI('#ocwi-42', { api: { lumaUrl: 'https://luma.example/a' } })
+  harness.context.window.OCWI('#ocwi-42', { ui: { name: 'Second' } })
+
+  harness.run({ attrs: { async: true } })
+
+  // The stub is gone: the loader installed its proxy and is injecting the core async.
+  assert.equal(harness.context.window.OCWI.__ocwiLoaderProxy, true)
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, false)
+  assert.equal(harness.appended.length, 1)
+  assert.equal(harness.appended[0].async, true)
+
+  // A further inline call now hits the proxy and must replay AFTER the buffered ones.
+  harness.context.window.OCWI('#ocwi-42', { ui: { name: 'Third' } })
+
+  const calls = []
+  harness.context.window.OCWI = function OCWI() {
+    calls.push(Array.from(arguments))
+    return { getState() { return null } }
+  }
+  harness.appended[0].onload()
+
+  assert.deepEqual(calls, [
+    ['#ocwi-42', { api: { lumaUrl: 'https://luma.example/a' } }],
+    ['#ocwi-42', { ui: { name: 'Second' } }],
+    ['#ocwi-42', { ui: { name: 'Third' } }],
+  ])
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
+  assert.equal(harness.context.window.__OCWI_LOADER_QUEUE__.length, 0)
+}
+
+// S2 (#20): an uncalled stub (eager .q = []) must STILL be recognised as a stub, not as
+// an already-loaded core. Otherwise a loader that executes before the inline call fires
+// would short-circuit at the already-loaded guard and the widget would never mount.
+{
+  const harness = createHarness({ readyState: 'complete' })
+  seedQueueStub(harness)
+
+  harness.run({ attrs: { async: true } })
+
+  assert.equal(harness.context.window.OCWI.__ocwiLoaderProxy, true)
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'dynamic')
+  assert.equal(harness.appended.length, 1)
+
+  // An inline call that lands AFTER the loader now hits the proxy and still replays.
+  const handle = harness.context.window.OCWI('#ocwi-9')
+  assert.equal(typeof handle.updateConfig, 'function')
+
+  const calls = []
+  harness.context.window.OCWI = function OCWI() {
+    calls.push(Array.from(arguments))
+    return { getState() { return null } }
+  }
+  harness.appended[0].onload()
+  assert.deepEqual(calls, [['#ocwi-9']])
+}
+
+// S3 (#20): the stub is adopted on the document.write path too (a stub preamble paired
+// with a parser-blocking loader), so a buffered call still replays once the core
+// registers via the bounded poll.
+{
+  const harness = createHarness({ readyState: 'loading' })
+  seedQueueStub(harness)
+  harness.context.window.OCWI('#ocwi-7', { api: { lumaUrl: 'https://luma.example/b' } })
+
+  harness.run()
+
+  assert.equal(harness.context.window.OCWI_LOADER.mode, 'document.write')
+  assert.equal(harness.context.window.OCWI.__ocwiLoaderProxy, true)
+  assert.equal(harness.writes.length, 1)
+
+  const calls = []
+  harness.context.window.OCWI = function realWidget() {
+    calls.push(Array.from(arguments))
+    return { getState() { return { ok: true } } }
+  }
+  harness.flushTimers()
+
+  assert.deepEqual(calls, [['#ocwi-7', { api: { lumaUrl: 'https://luma.example/b' } }]])
+  assert.equal(harness.context.window.OCWI_LOADER.loaded, true)
+}
+
 // P7 (#16): dist/loader.js is the parser-blocking entrypoint on every customer page, so
 // the shipped artifact must stay minified and under the gzipped byte budget. An
 // unminified or bloated bundle fails this assert (and the build itself).
