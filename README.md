@@ -71,7 +71,7 @@ Do not fetch the npm registry from browsers at runtime. That would add a registr
 
 There are two cache layers:
 
-1. `loader.js` is served by jsDelivr from the `ocwi-loader@latest` npm tag, a moving tag jsDelivr revalidates, so a new loader release reaches customers without a snippet change.
+1. `loader.js` is served by jsDelivr from the `ocwi-loader@latest` npm tag (a version alias, edge-cached up to 7 days and purgeable via their API), so a new loader release reaches customers without a snippet change - purge on release to skip the propagation delay.
 2. `ocwi-core@latest` is served by jsDelivr and may otherwise be cached by browsers for much longer.
 
 The loader controls the second layer by changing the core URL once per hour:
@@ -186,7 +186,7 @@ The loader is published to npm as `ocwi-loader` and served by jsDelivr from the 
 https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js
 ```
 
-jsDelivr revalidates the moving `@latest` tag, so a new loader release reaches customers without a snippet change; that is what keeps the loader a stable permanent entrypoint. Exact `ocwi-core@x.y.z` bundles the loader injects may be cached as immutable because the version is part of the URL. `ocwi-core@latest` is cache-busted hourly by the loader.
+jsDelivr serves the moving `@latest` tag (edge-cached up to 7 days, purgeable via their API), so a new loader release reaches customers without a snippet change - purge `ocwi-loader@latest` on release to skip the propagation delay. Exact `ocwi-core@x.y.z` bundles the loader injects may be cached as immutable because the version is part of the URL. `ocwi-core@latest` is cache-busted hourly by the loader.
 
 If you instead self-host `dist/loader.js` on your own controlled URL, keep it on a short cache (for example `Cache-Control: max-age=300, must-revalidate`) because it is the permanent customer entrypoint.
 
@@ -196,7 +196,7 @@ If you instead self-host `dist/loader.js` on your own controlled URL, keep it on
 2. Ensure the npm `latest` dist tag points to that version.
 3. Run `npm run test`.
 4. Verify the hosted loader diagnostics show `coreVersion: 'latest'` and a current `coreUrl` with `ocwi-loader-cache`.
-5. Purge the jsDelivr `latest` URL if the new core must appear before the CDN revalidates it.
+5. Purge the jsDelivr `latest` URL if the new core must appear before the CDN revalidates it. A loader release needs the same purge for `ocwi-loader@latest` (also edge-cached up to 7 days).
 
 ## Production Check
 
