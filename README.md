@@ -11,7 +11,7 @@ OCWI is embedded on many customer websites. Those websites should not need a web
 The customer keeps one permanent script URL:
 
 ```html
-<script src="https://cdn.amca.cz/ocwi/loader.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js" async></script>
 ```
 
 The loader then resolves the current `ocwi-core@latest` bundle at runtime. For `latest`, it adds an hourly cache-busting query parameter so browsers do not keep an old already-downloaded core URL for days or weeks.
@@ -31,7 +31,7 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
     }
   window.OCWI.q = window.OCWI.q || []
 </script>
-<script src="https://cdn.amca.cz/ocwi/loader.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js" async></script>
 <script>
   window.OCWI('#ocwi-19', {
     api: {
@@ -43,11 +43,14 @@ This updates OCWI on the next page load or reload. It does not hot-swap OCWI ins
 
 The snippet shape is intentionally close to the previous `ocwi-core` CDN snippet: the loader script carries `async` so neither the loader nor the core blocks the page parser. The first inline script installs a tiny synchronous queue-stub as `window.OCWI` so the call in the third script never throws, even though the `async` loader may not have run yet when it fires. The stub buffers calls on `window.OCWI.q`; the loader adopts and replays them once it runs. Keep the stub exactly as shown - it is required for the `async` snippet. A call made through the stub (before the loader runs) does not return a widget `.ready` handle.
 
-On the async path the core loads from `cdn.jsdelivr.net`, a different origin from the loader (`cdn.amca.cz`), so its connection is opened only after `loader.js` runs. Adding a preconnect hint to the page `<head>` lets the browser start that DNS/TCP/TLS setup earlier, saving roughly 100-300ms on a first visit:
+The loader and the core are now served from the same origin, `cdn.jsdelivr.net`: the async loader tag opens that connection itself, so the origin is already warm by the time the loader injects the core. A `cdn.jsdelivr.net` preconnect in the page `<head>` still helps, but only by the small head start it gives over the loader tag's own fetch. The larger, longer-lived win is preconnecting your Luma origin - the widget does not touch it until the core runs its config fetch and opens the SSE stream, so warming its DNS/TCP/TLS up front takes that setup off the critical path. Emitting both hints (this is what the Luma snippet generator produces) can save roughly 100-300ms on a first visit:
 
 ```html
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://luma.amca.cz" crossorigin>
 ```
+
+Replace `luma.amca.cz` with the origin of your own Luma config URL.
 
 ## How It Works
 
@@ -68,7 +71,7 @@ Do not fetch the npm registry from browsers at runtime. That would add a registr
 
 There are two cache layers:
 
-1. `loader.js` is hosted by AMCA and should be short-cache.
+1. `loader.js` is served by jsDelivr from the `ocwi-loader@latest` npm tag, a moving tag jsDelivr revalidates, so a new loader release reaches customers without a snippet change.
 2. `ocwi-core@latest` is served by jsDelivr and may otherwise be cached by browsers for much longer.
 
 The loader controls the second layer by changing the core URL once per hour:
@@ -107,14 +110,14 @@ For debugging or staged rollout, the loader script supports these attributes:
 
 ```html
 <script
-  src="https://cdn.amca.cz/ocwi/loader.js"
+  src="https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js"
   data-ocwi-version="1.1.2"
 ></script>
 ```
 
 ```html
 <script
-  src="https://cdn.amca.cz/ocwi/loader.js"
+  src="https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js"
   data-ocwi-src="https://static.example.com/ocwi/ocwi.min.js"
 ></script>
 ```
@@ -177,19 +180,15 @@ Example fields:
 
 ## Hosting
 
-Host `dist/loader.js` on a controlled URL, for example:
+The loader is published to npm as `ocwi-loader` and served by jsDelivr from the `@latest` tag, the same delivery path as `ocwi-core`:
 
 ```text
-https://cdn.amca.cz/ocwi/loader.js
+https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js
 ```
 
-Recommended cache headers for the loader:
+jsDelivr revalidates the moving `@latest` tag, so a new loader release reaches customers without a snippet change; that is what keeps the loader a stable permanent entrypoint. Exact `ocwi-core@x.y.z` bundles the loader injects may be cached as immutable because the version is part of the URL. `ocwi-core@latest` is cache-busted hourly by the loader.
 
-```http
-Cache-Control: max-age=300, must-revalidate
-```
-
-The loader should stay on a short cache because it is the permanent customer entrypoint. Exact `ocwi-core@x.y.z` bundles may be cached as immutable because the version is part of the URL. `ocwi-core@latest` is cache-busted hourly by the loader.
+If you instead self-host `dist/loader.js` on your own controlled URL, keep it on a short cache (for example `Cache-Control: max-age=300, must-revalidate`) because it is the permanent customer entrypoint.
 
 ## Release Flow
 
@@ -226,7 +225,7 @@ If `coreVersion` is a fixed version such as `1.1.2`, that page is pinned and wil
 In `luma-front`, point the existing snippet generator to the loader:
 
 ```env
-VITE_OCWI_SCRIPT_URL=https://cdn.amca.cz/ocwi/loader.js
+VITE_OCWI_SCRIPT_URL=https://cdn.jsdelivr.net/npm/ocwi-loader@latest/dist/loader.js
 ```
 
 The generator can keep producing the same HTML structure. Customers only receive the new script URL.
